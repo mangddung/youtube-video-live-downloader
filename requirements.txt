@@ -11,4 +11,4 @@ websockets==14.2
 certifi==2025.8.3
 charset-normalizer==3.3.2
 idna==3.7
-urllib3==2.5.0
+urllib3==2.8.0
