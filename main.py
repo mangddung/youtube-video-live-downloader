@@ -6,6 +6,9 @@ import threading
 import shutil
 import subprocess
 import queue
+import json
+import gc
+import glob
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
@@ -15,6 +18,45 @@ import re
 FORMAT_ID_RE = re.compile(r'\.f\d+(?:-\w+)?(?=\.\w+$)')
 # YouTube 서명 해제용 JS 런타임 (설치된 것만 사용됨). 없으면 일부 화질이 누락될 수 있음
 JS_RUNTIMES = {'deno': {}, 'node': {}}
+
+# 채팅 JSON의 메시지 종류 → TXT 앞에 붙일 표시
+CHAT_KINDS = {
+    'liveChatTextMessageRenderer': '',
+    'liveChatPaidMessageRenderer': '[슈퍼챗 {amount}] ',
+    'liveChatPaidStickerRenderer': '[스티커 {amount}] ',
+    'liveChatMembershipItemRenderer': '[멤버십] ',
+}
+
+
+def chat_json_to_txt(json_path, txt_path):
+    """yt-dlp .live_chat.json → '[시간] 닉네임: 내용' 텍스트. 저장한 메시지 수 반환.
+    시간: 다시보기는 영상 기준 위치, 실시간은 메시지를 보낸 시각."""
+    lines = []
+    with open(json_path, encoding='utf-8') as f:
+        for raw in f:
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                continue  # 중단 시 잘린 마지막 줄
+            replay = entry.get('replayChatItemAction', {})
+            for action in replay.get('actions', []):
+                item = action.get('addChatItemAction', {}).get('item', {})
+                for kind, r in item.items():
+                    if kind not in CHAT_KINDS:
+                        continue
+                    if entry.get('isLive'):
+                        when = datetime.fromtimestamp(int(r.get('timestampUsec', 0)) / 1e6).strftime('%H:%M:%S')
+                    else:
+                        when = r.get('timestampText', {}).get('simpleText', '')
+                    runs = (r.get('message') or r.get('headerSubtext') or {}).get('runs', [])
+                    text = ''.join(run.get('text') or (run.get('emoji', {}).get('shortcuts') or [''])[0]
+                                   for run in runs)
+                    tag = CHAT_KINDS[kind].format(amount=r.get('purchaseAmountText', {}).get('simpleText', ''))
+                    author = r.get('authorName', {}).get('simpleText', '')
+                    lines.append(f"[{when}] {tag}{author}: {text}")
+    with open(txt_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + ('\n' if lines else ''))
+    return len(lines)
 
 class YouTubeDownloaderGUI:
     def __init__(self):
@@ -88,12 +130,15 @@ class YouTubeDownloaderGUI:
         # 다운로드 버튼
         btn_frame = ttk.Frame(url_frame)
         btn_frame.grid(row=6, column=0, columnspan=2, sticky=tk.E, pady=(12, 0))
+        self.chat_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(btn_frame, text="💬 채팅도 저장", variable=self.chat_var).grid(
+            row=0, column=0, padx=(0, 12))
         self.download_btn = ttk.Button(btn_frame, text="▶ 다운로드 시작",
                                        command=self.start_download, state="disabled")
-        self.download_btn.grid(row=0, column=0, padx=(0, 6))
+        self.download_btn.grid(row=0, column=1, padx=(0, 6))
         self.stop_btn = ttk.Button(btn_frame, text="■ 중단",
                                    command=self.stop_download, state="disabled")
-        self.stop_btn.grid(row=0, column=1)
+        self.stop_btn.grid(row=0, column=2)
 
         # 진행률 표시 섹션
         progress_frame = ttk.LabelFrame(main_frame, text="다운로드 진행률", padding="10")
@@ -425,6 +470,8 @@ class YouTubeDownloaderGUI:
                 path = os.path.join(video_dir, name)
                 if re.search(r'-Frag\d+(\.part)?$', name) or name.endswith('.ytdl'):
                     self.safe_remove_file(path)
+                elif name.endswith('.live_chat.json.part'):
+                    self._finalize_chat(path[:-len('.part')])
                 elif name.endswith('.part'):
                     base = FORMAT_ID_RE.sub('', name[:-len('.part')])
                     groups.setdefault(base, []).append(path)
@@ -534,7 +581,8 @@ class YouTubeDownloaderGUI:
         option_label = self.quality_combo.get() if self.quality_options else '최고 화질 (자동)'
         selected_format, extra_opts = self.get_selected_opts()
         self.download_thread = threading.Thread(
-            target=self.download_worker, args=(url, option_label, selected_format, extra_opts))
+            target=self.download_worker,
+            args=(url, option_label, selected_format, extra_opts, self.chat_var.get()))
         self.download_thread.daemon = True
         self.download_thread.start()
         
@@ -554,10 +602,10 @@ class YouTubeDownloaderGUI:
         self.update_stream_info("연결 해제 중...")
         self.update_progress("중단 중...")
 
-    def download_worker(self, url, option_label, selected_format, extra_opts):
+    def download_worker(self, url, option_label, selected_format, extra_opts, save_chat):
         """다운로드 작업을 수행하는 워커 스레드"""
         try:
-            self.record_youtube_live(url, option_label, selected_format, extra_opts)
+            self.record_youtube_live(url, option_label, selected_format, extra_opts, save_chat)
         except KeyboardInterrupt:
             self.log_message("다운로드가 중단되었습니다.")
         except Exception as e:
@@ -585,7 +633,7 @@ class YouTubeDownloaderGUI:
             self.update_connection_status("중단됨")
             self.update_stream_info("연결 해제됨")
 
-    def record_youtube_live(self, url, option_label, selected_format, extra_opts):
+    def record_youtube_live(self, url, option_label, selected_format, extra_opts, save_chat):
         """
         주어진 YouTube 라이브 스트림 URL을 녹화합니다.
         방송이 끝나거나 사용자가 중단할 때까지 계속됩니다.
@@ -685,6 +733,16 @@ class YouTubeDownloaderGUI:
         # 파일명 결정 (중복 시 -1, -2 추가)
         outtmpl = self._resolve_outtmpl()
 
+        # 채팅은 별도 스레드: 라이브 채팅은 방송이 끝나야 끝나서 영상과 동시에 받아야 함
+        chat_stop = threading.Event()
+        chat_thread = None
+        if save_chat:
+            if 'live_chat' in (self.video_info or {}).get('subtitles', {}):
+                chat_thread = threading.Thread(target=self._download_chat,
+                                               args=(url, outtmpl, chat_stop), daemon=True)
+                chat_thread.start()
+            else:
+                self.log_message("💬 채팅이 없는 영상이라 채팅은 저장하지 않습니다.")
 
         # yt-dlp 옵션 설정
         ydl_opts = {
@@ -773,6 +831,62 @@ class YouTubeDownloaderGUI:
             time_label = "녹화시간" if self.is_live else "소요시간"
             self.log_message(f"❌ 오류 발생: {e}")
             self.log_message(f"⏱️  {time_label}: {str(total_duration).split('.')[0]}")
+        finally:
+            if chat_thread:
+                # 라이브 채팅은 영상과 함께 종료. 다시보기 채팅은 끝까지 받음
+                if self.is_live:
+                    chat_stop.set()
+                if chat_thread.is_alive():
+                    self.update_progress("💬 채팅 저장 마무리 중...")
+                chat_thread.join()
+
+    def _download_chat(self, url, outtmpl, chat_stop):
+        """채팅을 .live_chat.json으로 저장 후 .txt 변환 (작업 스레드)"""
+        chat_file = None
+
+        def chat_hook(d):
+            nonlocal chat_file
+            chat_file = d.get('filename') or chat_file
+            if d['status'] == 'downloading' and (self.stop_flag.is_set() or chat_stop.is_set()):
+                raise KeyboardInterrupt("채팅 저장 중단")
+
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'writesubtitles': True,
+            'subtitleslangs': ['live_chat'],
+            'outtmpl': outtmpl,
+            'js_runtimes': JS_RUNTIMES,
+            'progress_hooks': [chat_hook],
+        }
+        self.log_message("💬 채팅 저장 시작")
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+        except KeyboardInterrupt:
+            pass
+        except Exception as e:
+            self.log_message(f"💬 채팅 저장 오류: {e}")
+        # 중단 예외로 끝나면 yt-dlp가 채팅 파일 핸들을 닫지 않음 → 순환 참조 정리로 닫히게 함
+        gc.collect()
+
+        if chat_file:
+            self._finalize_chat(chat_file)
+        else:
+            self.log_message("💬 채팅을 받지 못했습니다.")
+
+    def _finalize_chat(self, chat_file):
+        """중단으로 .part로 남은 채팅 JSON을 정식 이름으로 바꾸고 .txt 생성"""
+        for frag in glob.glob(glob.escape(chat_file) + '.part-Frag*'):
+            self.safe_remove_file(frag)
+        if os.path.exists(chat_file + '.part'):
+            os.replace(chat_file + '.part', chat_file)
+        if not os.path.exists(chat_file):
+            return
+        txt_path = chat_file[:-len('.json')] + '.txt'
+        count = chat_json_to_txt(chat_file, txt_path)
+        self.log_message(f"💬 채팅 저장됨: {os.path.basename(txt_path)} ({count}개)")
 
     def run(self):
         """GUI 실행"""
