@@ -1,6 +1,5 @@
 # 직접 의존성
 yt-dlp==2026.8.19
-psutil==7.0.0
 
 # yt-dlp 의존성
 Brotli==1.2.0

@@ -39,7 +39,6 @@ echo.
     --hidden-import yt_dlp ^
     --hidden-import yt_dlp.extractor ^
     --hidden-import yt_dlp.postprocessor ^
-    --hidden-import psutil ^
     --collect-all yt_dlp ^
     main.py
 
