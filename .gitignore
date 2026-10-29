@@ -30,3 +30,5 @@ temp/
 temp
 
 .vscode
+.venv/
+
