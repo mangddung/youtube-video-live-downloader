@@ -10,5 +10,5 @@ websockets==14.2
 # requests 의존성
 certifi==2025.8.3
 charset-normalizer==3.3.2
-idna==3.7
+idna==3.15
 urllib3==2.5.0
