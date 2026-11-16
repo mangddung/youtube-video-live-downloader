@@ -13,12 +13,18 @@ Python + yt-dlp 기반의 유튜브 영상 및 라이브 방송 다운로더 데
   다운로드 전 화질 목록 조회 및 선택
 - **Audio extraction** — export audio-only as MP3 (192k / 320k), M4A, or WAV  
   오디오 전용 추출 (MP3 / M4A / WAV)
-- **Live indicator** — detects and labels live vs. regular video after fetch  
-  영상 조회 시 라이브 방송 / 일반 영상 자동 표시
-- **Custom save folder** — choose any folder; remembered across sessions via `config.json`  
-  저장 폴더 직접 지정, 재실행 시에도 기억
-- **Clean stop** — kills internal ffmpeg child processes immediately on cancel  
-  중단 시 내부 ffmpeg 자식 프로세스까지 즉시 강제 종료
+- **Live indicator** — detects and labels live / upcoming / regular video after fetch  
+  영상 조회 시 라이브 방송 / 예정된 방송 / 일반 영상 자동 표시
+- **Record from the start** — records a live stream from its beginning, or from now (checkbox)  
+  라이브를 방송 시작 시점부터 녹화 (체크 해제 시 지금부터)
+- **Upcoming streams** — waits until a scheduled stream goes live, then records  
+  예정된 방송은 시작될 때까지 기다렸다가 녹화
+- **Chat** — optionally saves live / replay chat as JSON + TXT  
+  라이브·다시보기 채팅을 JSON·TXT로 함께 저장 (선택)
+- **Custom save folder** — choose any folder; folder and checkbox options are remembered via `config.json`  
+  저장 폴더 직접 지정. 폴더와 체크 옵션은 재실행 시에도 기억
+- **Clean stop** — keeps what was downloaded so far as a `_중단_` file  
+  중단 시 받은 부분까지 `_중단_` 파일로 저장
 - **Standalone EXE** — build a single `.exe` with `build_exe.bat`  
   `build_exe.bat` 실행 한 번으로 단독 실행 EXE 빌드
 
@@ -29,7 +35,7 @@ Python + yt-dlp 기반의 유튜브 영상 및 라이브 방송 다운로더 데
 | | |
 |---|---|
 | Python | 3.9 or later |
-| ffmpeg | Required at `C:\ffmpeg\bin\ffmpeg.exe` — run `install_ffmpeg.bat` to install |
+| ffmpeg | Required at `C:\ffmpeg\bin\ffmpeg.exe` or on `PATH` — run `install_ffmpeg.bat` to install |
 
 > **ffmpeg 설치**: `install_ffmpeg.bat`을 실행하거나 [ffmpeg.org](https://ffmpeg.org/download.html)에서 수동 설치 후 `C:\ffmpeg\bin\` 경로에 배치하세요.
 
@@ -57,9 +63,10 @@ Output: `dist\YouTubeDownloader.exe`
 ## Usage / 사용법
 
 ```
-① URL 주소   유튜브 URL 붙여넣기 → [영상 조회] 클릭
+① URL 주소   유튜브 URL 붙여넣기 → [영상 조회] 클릭 (또는 Enter)
 ② 화질 선택  원하는 화질 또는 오디오 형식 선택
-③ 저장 폴더  저장 위치 확인 또는 [변경] 클릭
+③ 저장 폴더  저장 위치 확인 또는 [변경] 클릭 ([열기]로 폴더 열기)
+             라이브: [⏮ 방송 처음부터] / 채팅 있는 영상: [💬 채팅도 저장] 선택
              [▶ 다운로드 시작] 클릭
 ```
 
@@ -72,11 +79,10 @@ Downloaded files are saved in the `video/` folder next to the exe (or the select
 
 | Package | Version | Purpose |
 |---|---|---|
-| yt-dlp | 2026.3.17 | Core download engine |
-| psutil | 7.0.0 | Kill child ffmpeg processes on stop |
+| yt-dlp | 2026.8.19 | Core download engine |
 | mutagen | 1.47.0 | Audio metadata tagging |
 | websockets | 14.2 | Live stream support |
-| Brotli | 1.1.0 | Compressed stream support |
+| Brotli | 1.2.0 | Compressed stream support |
 | pycryptodomex | 3.20.0 | DRM stream support |
 | certifi / urllib3 / idna / charset-normalizer | pinned | requests dependencies |
 
