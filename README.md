@@ -82,7 +82,7 @@ Downloaded files are saved in the `video/` folder next to the exe (or the select
 | yt-dlp | 2026.8.19 | Core download engine |
 | mutagen | 1.47.0 | Audio metadata tagging |
 | websockets | 14.2 | Live stream support |
-| Brotli | 1.2.0 | Compressed stream support |
+| Brotli | 1.2.1 | Compressed stream support |
 | pycryptodomex | 3.20.0 | DRM stream support |
 | certifi / urllib3 / idna / charset-normalizer | pinned | requests dependencies |
 
